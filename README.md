@@ -55,3 +55,19 @@ ev = expectation_value(H_evolved, state, {theta: 0.5})
 - `PauliString.from_string('AB')`: `A` acts on qubit 1 (MSB), `B` acts on qubit 0 (LSB).
 - `gate_CNOT(control=0, target=1)`: control is qubit 0, target is qubit 1.
 - `to_matrix()` uses big-endian ordering: qubit `n-1` is the most significant bit.
+
+
+## Citation
+If you found this useful, please consider citing us.
+
+```
+@misc{shirgure2026challengesbarrenplateaumitigation,
+      title={Challenges in Barren Plateau Mitigation with Dynamic Parameterized Quantum Circuits}, 
+      author={Sumeet Shirgure and Efekan Kökcü and Siyuan Niu},
+      year={2026},
+      eprint={2606.23751},
+      archivePrefix={arXiv},
+      primaryClass={quant-ph},
+      url={https://arxiv.org/abs/2606.23751}, 
+}
+```
