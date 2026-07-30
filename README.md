@@ -40,6 +40,31 @@ state = np.array([1, 0, 0, 0], dtype=complex)
 ev = expectation_value(H_evolved, state, {theta: 0.5})
 ```
 
+## Approximate simulation
+
+Exact evolution grows the number of Pauli terms with circuit depth, in the worst case
+until it saturates the 4ⁿ available strings. `evolve_truncated` bounds the working set
+instead, discarding terms above a chosen Pauli weight after *every* gate — truncating
+once at the end would save nothing, since the intermediate blow-up has already been paid
+for. This is approximate Pauli-path simulation, and it is lossy by construction: the
+result equals `evolve`'s only when the cutoff cannot bite.
+
+```python
+from sympauli import evolve_truncated
+
+H_approx = evolve_truncated(H, circuit, n_qubits=n, max_weight=2)
+```
+
+A coefficient cutoff is available alongside the weight cutoff via `min_magnitude`, which
+needs a `subs` dict since coefficients are symbolic; a term whose value is still unknown
+after substitution is kept rather than guessed at.
+
+Truncated evolution routes each conjugation through `conjugate_by_gate_fast`, which
+recognizes a single-generator rotation `exp(-iθ/2·Q)` and applies the closed form
+`G†PG = P` when `[P,Q] = 0` and `cos(θ)·P − i·sin(θ)·PQ` when `{P,Q} = 0`, instead of
+building the triple product and simplifying away the terms that cancel. Anything else
+falls back to the exact path, so it is a drop-in replacement for `conjugate_by_gate`.
+
 ## Package structure
 
 | Module | Contents |
@@ -48,6 +73,8 @@ ev = expectation_value(H_evolved, state, {theta: 0.5})
 | `pauli_sum.py` | `PauliSum` — symbolic linear combination, arithmetic, adjoint, simplification |
 | `gates.py` | 40+ standard gates as `PauliSum`s: Rx/Ry/Rz, CNOT, CRy, RXX/RYY/RZZ, CCX, … |
 | `heisenberg.py` | `evolve`, `gradient`, `expectation_value`, `validate` |
+| `simplify.py` | `conjugate_by_gate_fast`, `as_rotation`, `simplify_coeffs`, `is_clifford_gate` |
+| `truncation.py` | `evolve_truncated`, `truncate`, `truncate_weight`, `truncate_coeff` |
 | `example.py` | Runnable demo: `python -m sympauli.example` |
 
 ## Qubit convention

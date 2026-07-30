@@ -11,6 +11,8 @@ Layers
 2. pauli_sum     : PauliSum     — symbolic linear combinations over SymPy
 3. gates         : Gate library — 40+ standard gates (Qiskit + PennyLane coverage)
 4. heisenberg    : Engine       — Heisenberg evolution, gradients, expectation values
+5. simplify      : Simplifier   — closed-form rotation conjugation, coefficient pipeline
+   truncation    : Pauli paths  — weight/magnitude cutoffs, approximate evolution
 
 Quick start
 -----------
@@ -33,6 +35,12 @@ from .heisenberg import (
     evolve, conjugate_by_gate, gradient,
     expectation_value, validate, evolve_numeric,
 )
+from .simplify import (
+    simplify_coeffs, conjugate_by_gate_fast, is_clifford_gate, as_rotation,
+)
+from .truncation import (
+    truncate, truncate_weight, truncate_coeff, evolve_truncated,
+)
 from . import gates
 
 __version__ = "0.1.0"
@@ -42,5 +50,7 @@ __all__ = [
     "PauliSum", "embed_sum",
     "evolve", "conjugate_by_gate", "gradient",
     "expectation_value", "validate", "evolve_numeric",
+    "simplify_coeffs", "conjugate_by_gate_fast", "is_clifford_gate", "as_rotation",
+    "truncate", "truncate_weight", "truncate_coeff", "evolve_truncated",
     "gates",
 ]

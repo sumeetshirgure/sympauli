@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-python -m pytest -q                    # full suite (~3 s)
+python -m pytest -q                    # full suite (~14 s)
 python -m pytest tests/test_gates.py   # one module
 python -m pytest -s tests/test_gates.py # -s is essential: see per-assertion output (below)
 python -m sympauli.example             # runnable demo of all public API
@@ -18,7 +18,7 @@ There is no linter, formatter, or CI configured.
 
 Each `tests/test_*.py` contains exactly one `test_all()` function holding hundreds of
 hand-rolled `check(...)` / `check_matrix(...)` assertions that increment local `passed`/
-`failed` counters and `pytest.fail()` at the end. So `pytest` reports **4 tests**, not 4
+`failed` counters and `pytest.fail()` at the end. So `pytest` reports **6 tests**, not 6
 hundred, and a failure message names only the count. Always run with `-s` when
 diagnosing — the individual `✗ <name>: max diff = ...` lines only reach stdout.
 
@@ -32,7 +32,7 @@ compare `gate.pauli_sum.to_matrix({})` to a reference NumPy matrix and check `U�
 
 ## Architecture
 
-Four stacked layers, each depending only on the ones below it:
+Five stacked layers, each depending only on the ones below it:
 
 | Layer | Module | Role |
 |---|---|---|
@@ -40,6 +40,8 @@ Four stacked layers, each depending only on the ones below it:
 | 2 | `pauli_sum.py` | `PauliSum`: `Σ cᵢPᵢ` with SymPy coefficients; all operator algebra |
 | 3 | `gates.py` | `Gate` namedtuple; ~50 gates as local `PauliSum`s + target tuple |
 | 4 | `heisenberg.py` | `evolve` / `gradient` / `expectation_value` / `validate` |
+| 5 | `simplify.py` | `conjugate_by_gate_fast` (closed-form rotations) / `simplify_coeffs` |
+| 5 | `truncation.py` | `evolve_truncated` / `truncate*` — approximate Pauli-path simulation |
 
 ### The two representation invariants
 
@@ -76,6 +78,32 @@ The dominant runtime cost is `_is_zero`, which calls `sp.simplify` on **every** 
 
 `gradient()` is not parameter-shift — it evolves symbolically and then `sp.diff`s each
 coefficient w.r.t. the symbol.
+
+### The layer-5 fast path and truncation
+
+`simplify.conjugate_by_gate_fast` is a drop-in replacement for `conjugate_by_gate`. When
+`as_rotation(gate)` recognizes `cos(θ/2)·I − i·sin(θ/2)·Q` it maps each term with the
+closed form `G†PG = P` for `[P,Q]=0` and `cos(θ)·P − i·sin(θ)·(P·Q)` for `{P,Q}=0`, so the
+triple product is never built and `_is_zero` never sees the terms that would have
+cancelled. **Operand order matters**: it is `P·Q`, not `Q·P` — the two differ by a sign for
+an anticommuting pair, and only `P·Q` reproduces `Rz†·X·Rz = cos(θ)X − sin(θ)Y`.
+Anything `as_rotation` rejects (including `S`, `SX`, `PhaseShift` — two-term gates that are
+rotations only up to a global phase) falls back to the exact path. `as_rotation` also
+rejects an angle not known to be real, because `adjoint()` would leave `conjugate(θ)`
+behind and the two paths would then disagree.
+
+`truncation.evolve_truncated` truncates **after every gate** in the order
+conjugate → simplify → truncate; see that module's docstring for why the order is not
+interchangeable. Weight truncation is a pure key filter (`popcount(x|z)`) and calls no
+SymPy, so it is cheap enough to run every step. Magnitude truncation needs a `subs` dict
+and **keeps** any term it cannot evaluate to a number — so calling it on a fully symbolic
+sum with no `subs` is a no-op, by design.
+
+One testing gotcha found while building this: when two gates share a parameter symbol, the
+fast and exact paths reach different but equal trigonometric forms, and the difference can
+land on an identity like `sin(θ)cos(θ)/tan(θ/2) − 2sin²(θ/2)cos(θ) + 2sin²(θ) − 2 = 0`
+that `sp.simplify` cannot reduce. That is a SymPy limitation, not a discrepancy — such
+cases are asserted numerically via `to_matrix` instead (see `tests/test_truncation.py` §7).
 
 ## Qubit and label conventions
 
