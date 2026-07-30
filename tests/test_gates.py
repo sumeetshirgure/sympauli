@@ -97,9 +97,32 @@ def test_all():
     up_to_global_phase("U3=X (θ=π,φ=0,λ=π)", mat(gate_U3(np.pi, 0, np.pi)), X)
     up_to_global_phase("U3=H (θ=π/2,φ=0,λ=π)", mat(gate_U3(np.pi/2, 0, np.pi)), H2)
 
+    # U1 — identical to PhaseShift, exact (no global phase freedom)
+    for lam in [0.0, np.pi/3, np.pi, t0]:
+        check_matrix(f"U1({lam:.3f})", mat(gate_U1(lam)), P_ref(lam))
+
+    # U2(φ,λ) = U3(π/2,φ,λ) = 1/√2 [[1, -e^{iλ}], [e^{iφ}, e^{i(φ+λ)}]]
+    # Built as Rz(φ)Ry(π/2)Rz(λ), which equals it up to the phase e^{-i(φ+λ)/2}.
+    def U2_ref(ph, lam):
+        return np.array([[1, -np.exp(1j*lam)],
+                         [np.exp(1j*ph), np.exp(1j*(ph+lam))]], dtype=complex) / np.sqrt(2)
+    for ph, lam in [(0.0, 0.0), (np.pi/3, np.pi/4), (0.777, t0), (np.pi, np.pi/2)]:
+        up_to_global_phase(f"U2({ph:.3f},{lam:.3f})", mat(gate_U2(ph, lam)), U2_ref(ph, lam))
+    # U2(0,π) is the Hadamard up to phase
+    up_to_global_phase("U2=H (φ=0,λ=π)", mat(gate_U2(0, np.pi)), H2)
+
+    # R(θ,φ) = Rz(φ)·Ry(θ)·Rz(-φ) — exact product of exact rotations
+    def R_ref(th, ph):
+        return Rz_ref(ph) @ Ry_ref(th) @ Rz_ref(-ph)
+    for th, ph in [(0.0, 0.0), (np.pi/2, np.pi/4), (t0, 0.777), (np.pi, np.pi/3)]:
+        check_matrix(f"R({th:.3f},{ph:.3f})", mat(gate_R(th, ph)), R_ref(th, ph))
+    # φ=0 reduces to plain Ry
+    check_matrix("R(θ,0) = Ry(θ)", mat(gate_R(t0, 0)), Ry_ref(t0))
+
     # -----------------------------------------------------------------------
     print("\nTwo-qubit Clifford gates:")
     check_matrix("CNOT", mat(gate_CNOT()), CNOT_ref)
+    check_matrix("CX (alias of CNOT)", mat(gate_CX()), CNOT_ref)
     check_matrix("CZ",   mat(gate_CZ()),   CZ_ref)
     check_matrix("SWAP", mat(gate_SWAP()), SWAP_ref)
 
@@ -108,6 +131,32 @@ def test_all():
 
     iSWAP_ref = np.array([[1,0,0,0],[0,0,1j,0],[0,1j,0,0],[0,0,0,1]], dtype=complex)
     check_matrix("iSWAP", mat(gate_iSWAP()), iSWAP_ref)
+
+    # CH: control = q0, so H acts on q1 for the basis states with q0=1 → indices 1,3
+    CH_ref = np.eye(4, dtype=complex)
+    CH_ref[np.ix_([1,3],[1,3])] = H2
+    check_matrix("CH", mat(gate_CH()), CH_ref)
+
+    # DCX = CX(q0→q1) then CX(q1→q0)
+    CNOT_10_ref = np.array([[1,0,0,0],[0,1,0,0],[0,0,0,1],[0,0,1,0]], dtype=complex)
+    DCX_ref = CNOT_10_ref @ CNOT_ref
+    check_matrix("DCX", mat(gate_DCX()), DCX_ref)
+    # sanity: DCX permutes basis states cyclically, so DCX³ = I
+    check_matrix("DCX³ = I", np.linalg.matrix_power(mat(gate_DCX()), 3), np.eye(4, dtype=complex))
+
+    # SISWAP = √iSWAP
+    r2 = 1/np.sqrt(2)
+    SISWAP_ref = np.array([[1,0,0,0],[0,r2,1j*r2,0],[0,1j*r2,r2,0],[0,0,0,1]], dtype=complex)
+    check_matrix("SISWAP", mat(gate_SISWAP()), SISWAP_ref)
+    check_matrix("SISWAP² = iSWAP", mat(gate_SISWAP()) @ mat(gate_SISWAP()), iSWAP_ref)
+
+    # ECR = (IX - XY)/√2  [Qiskit ECRGate]; Hermitian and unitary, so ECR² = I
+    ECR_ref = np.array([[0, 1, 0, 1j],
+                        [1, 0, -1j, 0],
+                        [0, 1j, 0, 1],
+                        [-1j, 0, 1, 0]], dtype=complex) / np.sqrt(2)
+    check_matrix("ECR", mat(gate_ECR()), ECR_ref)
+    check_matrix("ECR² = I", mat(gate_ECR()) @ mat(gate_ECR()), np.eye(4, dtype=complex))
 
     # -----------------------------------------------------------------------
     print("\nTwo-qubit parameterized gates:")
@@ -142,6 +191,12 @@ def test_all():
         check_matrix(f"RXX({ang:.3f})", mat(gate_RXX(ang)), RXX_ref(ang))
         check_matrix(f"RYY({ang:.3f})", mat(gate_RYY(ang)), RYY_ref(ang))
         check_matrix(f"RZZ({ang:.3f})", mat(gate_RZZ(ang)), RZZ_ref(ang))
+
+    # CP(λ) = diag(1,1,1,e^{iλ}) — symmetric in control/target
+    def CP_ref(lam): return np.diag([1, 1, 1, np.exp(1j*lam)]).astype(complex)
+    for lam in [0.0, np.pi/3, np.pi, t0]:
+        check_matrix(f"CP({lam:.3f})", mat(gate_CP(lam)), CP_ref(lam))
+    check_matrix("CP(π) = CZ", mat(gate_CP(np.pi)), CZ_ref)
 
     # RZX: exp(-iθ/2 ZX) — Z on q1 (left/high), X on q0 (right/low)
     # In our convention qubit0 is rightmost, so kron(Z,X):
@@ -220,6 +275,18 @@ def test_all():
     ZZZ_ref = np.cos(t0/2)*np.eye(8, dtype=complex) - 1j*np.sin(t0/2)*ZZZ
     check_matrix(f"PauliRot(ZZZ)", mat(pr3), ZZZ_ref)
 
+    # MultiRZ(θ,n) = exp(-iθ/2 · Z⊗n)
+    for n in [1, 2, 3, 4]:
+        Zn = Z
+        for _ in range(n - 1):
+            Zn = np.kron(Zn, Z)
+        MultiRZ_ref = np.cos(t0/2)*np.eye(2**n, dtype=complex) - 1j*np.sin(t0/2)*Zn
+        check_matrix(f"MultiRZ(θ,n={n})",
+                     mat(gate_MultiRZ(t0, n, list(range(n)))), MultiRZ_ref)
+    # n=2 coincides with RZZ
+    check_matrix("MultiRZ(θ,2) = RZZ(θ)",
+                 mat(gate_MultiRZ(t0, 2, [0,1])), RZZ_ref(t0))
+
     # -----------------------------------------------------------------------
     print("\nUnitarity check (U†U = I) for all 1- and 2-qubit gates:")
     gates_to_check = [
@@ -229,6 +296,11 @@ def test_all():
         gate_CRx(t0), gate_CRy(t0), gate_CRz(t0),
         gate_RXX(t0), gate_RYY(t0), gate_RZZ(t0),
         gate_IsingXY(t0), gate_PSWAP(t0),
+        gate_U1(t0), gate_U2(0.777, t0), gate_U3(t0, 0.777, 0.321), gate_R(t0, 0.777),
+        gate_CH(), gate_DCX(), gate_SISWAP(), gate_ECR(), gate_CP(t0),
+        gate_RZX(t0), gate_XXPlusYY(t0, 0.777), gate_XXMinusYY(t0, 0.777),
+        gate_CCX(), gate_CCZ(), gate_CSWAP(),
+        gate_MultiRZ(t0, 3, [0,1,2]), gate_PauliRot(t0, 'XYZ', [0,1,2]),
     ]
     for g in gates_to_check:
         M = mat(g)

@@ -265,16 +265,20 @@ def gate_U1(λ, target: int = 0) -> Gate:
 
 def gate_U2(φ, λ, target: int = 0) -> Gate:
     """
-    U2(φ,λ) = Rz(φ+π/2) · Ry(π/2) · Rz(λ-π/2)
-    Pauli decomposition derived from matrix:
-    U2 = 1/√2 [[1, -e^{iλ}], [e^{iφ}, e^{i(φ+λ)}]]
-       = 1/√2 [(1+e^{i(φ+λ)})I/2 + ... ]
-    We compute directly from the Rz·Ry·Rz product via PauliSum multiplication.
+    U2(φ,λ) = U3(π/2, φ, λ) = Rz(φ) · Ry(π/2) · Rz(λ)
+    U2 = 1/√2 [[1, -e^{iλ}], [e^{iφ}, e^{i(φ+λ)}]]   (up to global phase)
+
+    Since Rz(φ)Ry(θ)Rz(λ) = e^{-i(φ+λ)/2}·U3(θ,φ,λ), the product below equals
+    the Qiskit U2 matrix up to the global phase e^{-i(φ+λ)/2}.
+
+    NOTE: the ±π/2 offsets in the commonly quoted
+    U2 = Rz(φ+π/2)·Rx(π/2)·Rz(λ-π/2) belong to the *Rx* form; they must not be
+    combined with Ry.
     """
     φ, λ = sp.sympify(φ), sp.sympify(λ)
-    Rz_a = gate_Rz(φ + sp.pi/2).pauli_sum
+    Rz_a = gate_Rz(φ).pauli_sum
     Ry_h = gate_Ry(sp.pi/2).pauli_sum
-    Rz_b = gate_Rz(λ - sp.pi/2).pauli_sum
+    Rz_b = gate_Rz(λ).pauli_sum
     ps = (Rz_a * Ry_h * Rz_b).simplify('trig')
     return Gate(ps, (target,), f'U2({φ},{λ})')
 
@@ -346,16 +350,19 @@ def gate_CZ(control: int = 0, target: int = 1) -> Gate:
 def gate_CH(control: int = 0, target: int = 1) -> Gate:
     """
     Controlled-H gate.
-    CH = ½II + (1/2√2)IX + (1/2√2)IZ + ½ZI - (1/2√2)ZX + (1/2√2)ZZ
+    Control is local qubit 0 (rightmost label position), target is local qubit 1.
+    CH = |0><0|_c ⊗ I + |1><1|_c ⊗ H_t
+       = ½(II + IZ) + ½(II - IZ)·(XI + ZI)/√2
+       = ½II + ½IZ + (1/2√2)(XI + ZI - XZ - ZZ)
     """
     s2 = sp.sqrt(2)
     return _gate2({
         'II':  _H,
+        'IZ':  _H,
         'XI':  _I/(2*s2),
         'ZI':  _I/(2*s2),
-        'IZ':  _H,
         'XZ': -_I/(2*s2),
-        'ZZ':  _I/(2*s2),
+        'ZZ': -_I/(2*s2),
     }, 'CH', control, target)
 
 def gate_SWAP(t0: int = 0, t1: int = 1) -> Gate:
@@ -403,29 +410,37 @@ def gate_SISWAP(t0: int = 0, t1: int = 1) -> Gate:
 def gate_ECR(t0: int = 0, t1: int = 1) -> Gate:
     """
     ECR (Echoed Cross Resonance) gate.
-    ECR = 1/√2 (IX + ZX·i ... )
-    ECR matrix = 1/√2 [[0,0,1,i],[0,0,i,1],[1,-i,0,0],[-i,1,0,0]]
-    Pauli decomposition: ECR = 1/√2·(IX + ZY)... let me derive carefully.
-    ECR = (1/√2)(ZX + IX·i... )
-    Standard: ECR = 1/√2·RZX(π/2)·X⊗I = (1/√2)(IX + ZY)
-    Direct: ECR = (1/√2)(IX + ZY)... wait:
-    From matrix: (1/√2)[[0,1,0,i],[1,0,-i,0],[0,i,0,1],[- i,0,1,0]]
-    = (1/√2)(IX + i·YZ) ... let me just compute numerically to verify.
-    After careful algebra: ECR = (1/√2)(IX + ZY)
+    ECR = (1/√2)(IX - XY)   [Qiskit ECRGate]
+
+    Matrix (basis |00>,|01>,|10>,|11> with qubit 0 the least significant):
+        (1/√2)[[0,  1,  0,  i],
+               [1,  0, -i,  0],
+               [0,  i,  0,  1],
+               [-i, 0,  1,  0]]
+    Hermitian and unitary, so ECR² = II.
+    Labels follow this module's convention: 'IX' = I on local qubit 1, X on
+    local qubit 0.
     """
     s2 = sp.sqrt(2)
-    return _gate2({'XI': _I/s2, 'YZ': _I/s2}, 'ECR', t0, t1)
+    return _gate2({'IX': _I/s2, 'XY': -_I/s2}, 'ECR', t0, t1)
 
 def gate_DCX(t0: int = 0, t1: int = 1) -> Gate:
     """
-    DCX (Double CX) gate.
-    DCX = CNOT(0→1) · CNOT(1→0)
-    = ½(II + IX + ZI - ZX) · ½(II + XI + IZ - XZ)   [careful: order matters]
-    We compute via PauliSum multiplication.
+    DCX (Double CX) gate: CX(q0→q1) followed by CX(q1→q0).
+
+    NOTE: we cannot build this from gate_CNOT(0,1) and gate_CNOT(1,0) — a Gate's
+    control/target arguments only populate its `targets` tuple (used at embedding
+    time), so both calls return the *same* local PauliSum and their product is
+    the identity.  The reversed-control decomposition must be written out:
+
+        CX(ctrl=q0, tgt=q1) = ½(II + IZ + XI - XZ)
+        CX(ctrl=q1, tgt=q0) = ½(II + ZI + IX - ZX)
+
+    Applying CX(q0→q1) first means left-multiplying by the second one.
     """
-    cnot_01 = gate_CNOT(0, 1).pauli_sum
-    cnot_10 = gate_CNOT(1, 0).pauli_sum
-    ps = (cnot_01 * cnot_10).simplify()
+    cnot_01 = PauliSum.from_dict({'II': _H, 'IZ': _H, 'XI': _H, 'XZ': -_H}, n=2)
+    cnot_10 = PauliSum.from_dict({'II': _H, 'ZI': _H, 'IX': _H, 'ZX': -_H}, n=2)
+    ps = (cnot_10 * cnot_01).simplify()
     return Gate(ps, (t0, t1), 'DCX')
 
 
